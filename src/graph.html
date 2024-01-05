@@ -1,0 +1,61 @@
+<html>
+<head>
+    <title>Graph editor: untitled</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script type="text/javascript" src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <style type="text/css">
+        #graph {
+            width: 70%;
+            height: 100%;
+            border: 3px solid lightgray;
+        }
+        #main {
+            display: flex;
+            flex-direction: row;
+            height: 100%;
+        }
+        #side {
+            flex-grow: 1;
+            height: 100%;
+            display: flex;
+            max-width: 30%;
+            flex-direction: column;
+        }
+        #cnt {
+            display: grid;
+            flex-grow: 1;
+            /* grid-template-rows: repeat(2, minmax(0, 100%));
+            grid-template-columns: repeat(2, minmax(0, 100%)); */
+            grid-template-rows: repeat(auto-fit, minmax(50%, 1fr));
+            grid-auto-flow: column;
+            
+            
+            /*gap: 10px; /* Adjust gap as needed */
+            /* grid-template-columns: repeat(2, minmax(1fr, auto));
+            grid-template-rows: repeat(2, minmax(1fr, auto)); */
+            
+        }
+        #toolbar {
+            width: 100%;
+            height: 60px;
+        }
+    </style>
+</head>
+<body>
+    <div id="main">
+        <div id="graph"></div>
+        <div id="side">
+            <div id="toolbar">
+                <input type="color" name="nodeColor" id="nodeColor">
+            </div>
+            <div id="cnt"></div>
+        </div>
+    </div>
+    <dialog id= "renamebox">
+        <form method="dialog">
+            <input type="text" name= "renamebox"/>
+        </form>
+    </dialog>
+    <script type="text/javascript" src="./main.js"></script>
+</body>
+</html>
