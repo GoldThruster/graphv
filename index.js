@@ -7,20 +7,171 @@ var controled = false;
 
 const preventSelection = {interaction: {selectable: false}};
 
-const deleteKey = 46;
+
 const shiftKey = 16;
-const enterKey = 13;
-const backspaceKey = 8;
 const altKey = 18;
 const cntrlKey = 17;
-const sKey = 83;
-const dKey = 68;
+
+
+
+const keys = {
+    // modifiers
+    shift: 16,
+    ctrl: 17,
+    alt: 18,
+    // commands
+    backspace: 8,
+    enter: 13,
+    delete: 46,
+    // letters
+    d: 68,
+    s: 83
+}
+
+const page = {
+    graph: $('#graph')
+}
+
+const features = {
+    deleteSelection: function () {
+        network.deleteSelected();
+    },
+    rename: function () {
+        if(!isEmpty(network.getSelectedNodes()))
+            rewrite(false, data.nodes, last(network.getSelectedNodes()));
+        else if (!isEmpty(network.getSelectedEdges()))
+            rewrite(true, data.edges, last(network.getSelectedEdges()));
+    },
+    export: function () {
+        network.stopSimulation();
+        network.storePositions();
+        const d = {nodes: data.nodes.get(), edges: data.edges.get(), docs: docs.get()};
+        const toExport = JSON.stringify(d);
+        download(toExport, title, "json");
+    },
+    import: function (file) {
+        const toImport = JSON.parse(file);
+        data = {
+            nodes: new vis.DataSet(toImport.nodes),
+            edges: new vis.DataSet(toImport.edges)
+        };
+        docs = new vis.DataSet(toImport.docs);
+        
+        network.setData(data);
+    },
+    duplicate: duplicate,
+    promptExitComfirmation: function (event) {
+        event.preventDefault(); 
+        event.returnValue = "Are you sure?";
+    }
+}
+
+const handlers = {
+    keydown: [
+        when(isOneOf([keys.delete, keys.backspace]), features.deleteSelection),
+        when(is(keys.enter),                         features.rename),
+        when((k) => k == keys.s && shifted,          features.export),
+        when((k) => k == keys.d && shifted,          features.duplicate)
+    ],
+    beforeunload: [
+        features.promptExitComfirmation,
+    ],
+    drop: [
+        check(isJson, function (event) {
+            const file = event.dataTransfer.files[0];
+            title = file.name.split('.')[0];
+            document.title = "Graph editor: " + title;
+            file.text().then(features.import, (reason) => alert("File not read: " + reason));
+            event.preventDefault();
+        }),
+        check(isHtml, function(event) {
+            const file = event.dataTransfer.files[0];
+            const nodeId = network.getNodeAt({x: event.pageX, y: event.pageY});
+            if(nodeId)
+            {
+                file.text().then((text) => associateDoc(nodeId, text), (reason) => alert("File not read: " + reason));
+                event.preventDefault();
+            }
+        })
+    ]
+}
+
+function wireEvents() {
+    page.graph.on('keydown', mediate('which', dispatch(handlers.keydown)));
+    page.graph.on('drop', mediate('originalEvent', dispatch(handlers.drop)));
+    window.addEventListener('beforeunload',   dispatch(handlers.beforeunload));
+}
+
+function isJson(event) {
+    const file = event.dataTransfer?.files?.item(0);
+    return file && file.type === 'application/json';
+}
+
+function isHtml(event) {
+    const file = event.dataTransfer?.files?.item(0);
+    return file && file.type === 'text/html';
+}
+
+
+
+function ignore(f) {
+    return (_) => f();
+}
+
+function isOneOf(arr) {
+    return (elem) => Array.prototype.includes.call(arr, elem);
+}
+
+function is(a) {
+    return (b) => a == b;
+}
+
 
 function last(arr){
     return arr.slice(-1)[0];
 }
 
-$("#graph").on('keydown', function(e){
+
+
+function check(p, f) {
+    function internal(x) {
+        const hasMatched = p.call(null, x);
+        if(hasMatched) {
+            f(x);
+        }
+        return hasMatched;
+    }
+
+    return internal;
+}
+
+function when(p, f) {
+    return check(p, ignore(f));
+}
+
+function dispatch(fs) {
+    function internal(x) {
+        for (const f of fs) {
+            if(f(x)) return;
+        }
+    }
+
+    return internal;
+}
+
+function mediate(key, f) {
+    function internal(x) {
+        f(x[key]);
+    }
+
+    return internal;
+} 
+
+
+
+wireEvents();
+
+page.graph.on('keydown', function(e){
     switch (e.which) {
         case shiftKey:
             network.setOptions({...options, ...preventSelection});
@@ -32,34 +183,12 @@ $("#graph").on('keydown', function(e){
         case cntrlKey:
             controled = true;
             break;
-
-        case backspaceKey:
-        case deleteKey:
-            network.deleteSelected();
-            break;
-        case enterKey:
-            if(!isEmpty(network.getSelectedNodes())) {
-                rewrite(false, data.nodes, last(network.getSelectedNodes()));
-            }
-            else if (!isEmpty(network.getSelectedEdges())) {
-                rewrite(true, data.edges, last(network.getSelectedEdges()));
-            }
-            break;
-        case sKey:
-            if(shifted) {
-                exportNetwork();
-            }
-            break;
-        case dKey:
-            if(shifted) {
-                duplicate();
-            }
-            break;
     }
 
     return true;
 });
-$("#graph").on('keyup', function(e){
+
+page.graph.on('keyup', function(e){
     switch (e.which) {
         case shiftKey:
             network.setOptions(options);
@@ -147,13 +276,23 @@ function isSingleton (x) {
     return typeof x !== 'undefined' && x.length === 1
 }
 
-function rewrite(doForce, set, id) {
+function rewrite(isEdge, set, id) {
     let elem = set.get(id);
     let newLabel = prompt("New label", elem.label);
     
-    const n = {...elem, label: newLabel ?? elem.label};
-    if(doForce){
+    const preLabel = newLabel ?? elem.label
+    const n = {...elem, label: preLabel};
+    if(isEdge){
+        const offset = preLabel.length;
+        console.log(offset);
+        if(offset > 10)
+        {
+            n.length = 75 + offset*1.8;
+        }
         set.remove(n.id);
+    }
+    else {
+        n.mass = scale(1, preLabel.length);
     }
     set.update(n);
 }
@@ -166,12 +305,16 @@ function handleDoubleClick(event) {
     if( !anyN && !anyE ) //New node
     {
         let label = prompt("Label");
-        data.nodes.add({id: network.length, label: label, x: event.pointer.canvas.x, y: event.pointer.canvas.y})
+        data.nodes.add({id: network.length, label: label, x: event.pointer.canvas.x, y: event.pointer.canvas.y, mass: scale(1, label.length)});
     }
     else if (singleE && !anyN) //Edit edge
     {
         network.editEdgeMode();
     }
+}
+
+function scale(min, l) {
+    return Math.max(min, Math.log2(l)) * 1.2;
 }
 
 function handleClick(event) {
@@ -205,7 +348,7 @@ nodeColorPicker.addEventListener('input', (event) => {
     const coloredE = data.edges.get(network.getSelectedEdges()).map(updateColor);
     data.nodes.update(coloredN);
     data.edges.update(coloredE);
-})
+});
 
 function handleSelectNode(nodes)
 {
@@ -240,24 +383,6 @@ function handleDeselectNode(event)
     shown = ids;
 }
 
-
-function exportNetwork() {
-    network.storePositions();
-    const d = {nodes: data.nodes.get(), edges: data.edges.get(), docs: docs.get()};
-    const toExport = JSON.stringify(d);
-    download(toExport, title, "json");
-}
-
-function importNetwork(file) {
-    const toImport = JSON.parse(file);
-    data = {
-        nodes: new vis.DataSet(toImport.nodes),
-        edges: new vis.DataSet(toImport.edges)
-    };
-    docs = new vis.DataSet(toImport.docs);
-    
-    network.setData(data);
-}
 
 function download (cnt, fileName, fileType)  {
     const anchor = document.getElementById('local_filesaver') || document.createElement('a');
@@ -310,33 +435,6 @@ container.addEventListener("dragover", (event) => {
     }
 });
 
-
-container.addEventListener('drop', (event) => {
-    const isFiles = event.dataTransfer.types.includes("Files");
-    if(isFiles)
-    {   
-        const data = event.dataTransfer.files[0];
-
-        if(data.type === 'application/json')
-        {   
-            title = data.name.split('.')[0];
-            document.title = "Graph editor: " + title;
-            data.text().then(importNetwork, (reason) => alert("File not read: " + reason));
-            event.preventDefault();
-        }
-        else if (data.type === 'text/html')
-        {
-            const nodeId = network.getNodeAt({x: event.pageX, y: event.pageY});
-
-            if(nodeId)
-            {
-                data.text().then((text) => associateDoc(nodeId, text), (reason) => alert("File not read: " + reason));
-                event.preventDefault();
-            }
-        }
-    }
-});
-
 function associateDoc(id, text) {
     docs.update({id: id, content: text});
     
@@ -346,29 +444,32 @@ function associateDoc(id, text) {
     handleSelectNode(sel);
 }
 
-// create an array with nodes
-var nodes = new vis.DataSet([]);
-
 
 var docs = new vis.DataSet([]);
 
 var shown = [];
 
-// create an array with edges
-var edges = new vis.DataSet([]);
-
 
 
 // provide the data in the vis format
 var data = {
-    nodes: nodes,
-    edges: edges
+    nodes: new vis.DataSet([]),
+    edges: new vis.DataSet([])
 };
 var options = {
     manipulation: {
         enabled: false
     },
+    edges: {
+        arrows: 'to',
+        widthConstraint: 75
+    },
     nodes: {
+        font: {
+            size: 16,
+            strokeWidth: 0.3,
+            strokeColor: '#343434'
+        },
         widthConstraint: {
             minimum: 5,
             maximum: 120
