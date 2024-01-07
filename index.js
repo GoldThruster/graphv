@@ -1,4 +1,4 @@
-var renaming = false;
+import * as u from './utils.js';
 
 
 var shifted = false;
@@ -25,11 +25,13 @@ const keys = {
     delete: 46,
     // letters
     d: 68,
-    s: 83
+    s: 83,
+    space: 32
 }
 
 const page = {
-    graph: $('#graph')
+    graph: $('#graph'),
+    colorPicker: $('#colorpicker'),
 }
 
 const features = {
@@ -37,10 +39,10 @@ const features = {
         network.deleteSelected();
     },
     rename: function () {
-        if(!isEmpty(network.getSelectedNodes()))
-            rewrite(false, data.nodes, last(network.getSelectedNodes()));
-        else if (!isEmpty(network.getSelectedEdges()))
-            rewrite(true, data.edges, last(network.getSelectedEdges()));
+        if(!u.isEmpty(network.getSelectedNodes()))
+            rewrite(false, data.nodes, u.last(network.getSelectedNodes()));
+        else if (!u.isEmpty(network.getSelectedEdges()))
+            rewrite(true, data.edges, u.last(network.getSelectedEdges()));
     },
     export: function () {
         network.stopSimulation();
@@ -63,28 +65,98 @@ const features = {
     promptExitComfirmation: function (event) {
         event.preventDefault(); 
         event.returnValue = "Are you sure?";
+    },
+    changeColor: function (event) {
+        function updateColor(x) {return {id: x, color: color}};
+
+        const color = event.target.value;
+        const coloredN = network.getSelectedNodes().map(updateColor);
+        const coloredE = network.getSelectedEdges().map(updateColor);
+        data.nodes.update(coloredN);
+        data.edges.update(coloredE);
+    },
+    togglePhysics: function (doesPhysicsApply) {
+        function updatePhysics(x) {
+            return {id: x, physics: doesPhysicsApply};
+        };
+        updateNodes((x) => stripPosition(updatePhysics(x)));
+        updateEdges(updatePhysics);
+        // const upN = network.getSelectedNodes().map();
+        // const upE = network.getSelectedEdges().map(updatePhysics);
+        // data.nodes.update(upN);
+        // data.edges.update(upE);
+    },
+    toggleArrow: function() {
+        var selected = data.edges.get(network.getSelectedEdges());
+
+        function internal(prev) {
+            console.log("arrows", prev.arrows);
+
+            var newArrows;
+            
+            switch (prev.arrows) {
+                case undefined:
+                case '':
+                    newArrows = 'to';
+                    break;
+                case 'to':
+                    newArrows = 'from';
+                    break;
+                default:
+                    newArrows = '';
+                    break;
+            }
+
+            return {id: prev.id, arrows: newArrows};
+        }
+        updateEdges(internal, selected);
     }
 }
 
+function stripPosition(from) {
+    return {...from, x: undefined, y: undefined};
+}
+
+function updateContainer(container, f, elems) {
+    const newN = elems.map(f);
+    container.update(newN);
+}
+
+function updateNodes(f, nodes) {
+    var n = nodes || network.getSelectedNodes();
+    updateContainer(data.nodes, f, n);
+}
+
+function updateEdges(f, edges) {
+    updateContainer(data.edges, f, (edges || network.getSelectedEdges()));
+}
+
+function updateGraph(f, nodes, edges) {
+    updateNodes(f, nodes);
+    updateEdges(f, edges);
+}
+
+
 const handlers = {
     keydown: [
-        when(isOneOf([keys.delete, keys.backspace]), features.deleteSelection),
-        when(is(keys.enter),                         features.rename),
-        when((k) => k == keys.s && shifted,          features.export),
-        when((k) => k == keys.d && shifted,          features.duplicate)
+        u.when(u.isOneOf([keys.delete, keys.backspace]), features.deleteSelection),
+        u.when(u.is(keys.enter),                         features.rename),
+        u.when((k) => k == keys.s && shifted,            features.export),
+        u.when((k) => k == keys.d && shifted,            features.duplicate),
+        u.when(u.is(keys.space),                         features.toggleArrow)
     ],
     beforeunload: [
         features.promptExitComfirmation,
     ],
     drop: [
-        check(isJson, function (event) {
+        u.check(isJson, function (event) {
             const file = event.dataTransfer.files[0];
             title = file.name.split('.')[0];
             document.title = "Graph editor: " + title;
             file.text().then(features.import, (reason) => alert("File not read: " + reason));
             event.preventDefault();
         }),
-        check(isHtml, function(event) {
+        u.check(isHtml, function(event) {
             const file = event.dataTransfer.files[0];
             const nodeId = network.getNodeAt({x: event.pageX, y: event.pageY});
             if(nodeId)
@@ -93,13 +165,27 @@ const handlers = {
                 event.preventDefault();
             }
         })
-    ]
+    ],
+    color: {
+        begin: [
+            u.ignore(() => features.togglePhysics(false))
+        ],
+        update: [
+            features.changeColor
+        ],
+        end: [
+            u.ignore(() => features.togglePhysics(true))
+        ]
+    }
 }
 
 function wireEvents() {
-    page.graph.on('keydown', mediate('which', dispatch(handlers.keydown)));
-    page.graph.on('drop', mediate('originalEvent', dispatch(handlers.drop)));
-    window.addEventListener('beforeunload',   dispatch(handlers.beforeunload));
+    page.graph.on('keydown', u.mediate('which', u.dispatch(handlers.keydown)));
+    page.graph.on('drop', u.mediate('originalEvent', u.dispatch(handlers.drop)));
+    page.colorPicker.on('click', u.dispatch(handlers.color.begin));
+    page.colorPicker.on('input', u.dispatch(handlers.color.update));
+    page.colorPicker.on('change', u.dispatch(handlers.color.end));
+    window.addEventListener('beforeunload',   u.dispatch(handlers.beforeunload));
 }
 
 function isJson(event) {
@@ -111,65 +197,6 @@ function isHtml(event) {
     const file = event.dataTransfer?.files?.item(0);
     return file && file.type === 'text/html';
 }
-
-
-
-function ignore(f) {
-    return (_) => f();
-}
-
-function isOneOf(arr) {
-    return (elem) => Array.prototype.includes.call(arr, elem);
-}
-
-function is(a) {
-    return (b) => a == b;
-}
-
-
-function last(arr){
-    return arr.slice(-1)[0];
-}
-
-
-
-function check(p, f) {
-    function internal(x) {
-        const hasMatched = p.call(null, x);
-        if(hasMatched) {
-            f(x);
-        }
-        return hasMatched;
-    }
-
-    return internal;
-}
-
-function when(p, f) {
-    return check(p, ignore(f));
-}
-
-function dispatch(fs) {
-    function internal(x) {
-        for (const f of fs) {
-            if(f(x)) return;
-        }
-    }
-
-    return internal;
-}
-
-function mediate(key, f) {
-    function internal(x) {
-        f(x[key]);
-    }
-
-    return internal;
-} 
-
-
-
-wireEvents();
 
 page.graph.on('keydown', function(e){
     switch (e.which) {
@@ -205,15 +232,9 @@ page.graph.on('keyup', function(e){
     return true;
 });
 
-
-function uid(){
-    //return Date.now().toString(36) + Math.random().toString(36).slice(0, 10);
-    return self.crypto.randomUUID();
-}
-
 function duplicate(){
     function substituteIdN(acc, x) {
-        const newId = uid();
+        const newId = u.uid();
         acc.nodes.push({...x, id: newId});
         acc.map[x.id] = newId;
 
@@ -226,7 +247,7 @@ function duplicate(){
     }
 
     function substituteIdE(map, x) {
-        return {...x, id: uid(), from: map[x.from], to: map[x.to]};
+        return {...x, id: u.uid(), from: map[x.from], to: map[x.to]};
     }
 
     function stripId(x) {
@@ -246,7 +267,7 @@ function duplicate(){
     const selIds = network.getSelectedNodes();
     const selE = data.edges.get(network.getSelectedEdges());
 
-    if(isEmpty(selIds))
+    if(u.isEmpty(selIds))
     {
         data.edges.add(selE.map(stripId));
     }
@@ -259,21 +280,6 @@ function duplicate(){
         duplicateDocs(substituted.map);
     }
     
-}
-
-
-
-function handleConnectionDrag(event) {
-    event.event.preventDefault();
-    network.addEdgeMode();
-}
-
-function isEmpty (x) {
-    return typeof x === 'undefined' || x.length === 0
-}
-
-function isSingleton (x) {
-    return typeof x !== 'undefined' && x.length === 1
 }
 
 function rewrite(isEdge, set, id) {
@@ -298,14 +304,17 @@ function rewrite(isEdge, set, id) {
 }
 
 function handleDoubleClick(event) {
-    let anyN = !isEmpty(event.nodes);
-    let anyE = !isEmpty(event.edges);
-    let singleE = isSingleton(event.edges);
+    let anyN = !u.isEmpty(event.nodes);
+    let anyE = !u.isEmpty(event.edges);
+    let singleE = u.isSingleton(event.edges);
 
     if( !anyN && !anyE ) //New node
     {
         let label = prompt("Label");
-        data.nodes.add({id: network.length, label: label, x: event.pointer.canvas.x, y: event.pointer.canvas.y, mass: scale(1, label.length)});
+        if(label)
+        {
+            data.nodes.add({id: network.length, label: label, x: event.pointer.canvas.x, y: event.pointer.canvas.y, ciao: "ciao", mass: scale(1, label.length)});
+        }
     }
     else if (singleE && !anyN) //Edit edge
     {
@@ -336,23 +345,15 @@ function handleClick(event) {
     }
 }
 
+
+
 var cnt = $("#cnt");
-var toolbar = document.getElementById('toolbar');
-var nodeColorPicker = document.getElementById('nodeColor');
 var title = "untitled";
 
-nodeColorPicker.addEventListener('input', (event) => {
-    function updateColor(x) {return {...x, color: color}}
-    const color = event.target.value;
-    const coloredN = data.nodes.get(network.getSelectedNodes()).map(updateColor);
-    const coloredE = data.edges.get(network.getSelectedEdges()).map(updateColor);
-    data.nodes.update(coloredN);
-    data.edges.update(coloredE);
-});
 
 function handleSelectNode(nodes)
 {
-    const id = last(nodes);
+    const id = u.last(nodes);
     const newD = docs.get(id);
     
     const isNew = !shown.includes(id);
@@ -461,7 +462,6 @@ var options = {
         enabled: false
     },
     edges: {
-        arrows: 'to',
         widthConstraint: 75
     },
     nodes: {
@@ -492,3 +492,4 @@ network.on("doubleClick", handleDoubleClick);
 network.on("click", handleClick);
 network.on("selectNode", (e) => handleSelectNode(e.nodes));
 network.on("deselectNode", handleDeselectNode);
+wireEvents();
